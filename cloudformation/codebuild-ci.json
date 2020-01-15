@@ -1,0 +1,471 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "CodeBuild CI Sample",
+    "Parameters": {
+        "BuildImage": {
+            "AllowedValues": [
+                "aws/codebuild/ubuntu-base:14.04",
+                "aws/codebuild/android-java-8:24.4.1",
+                "aws/codebuild/android-java-7:24.4.1",
+                "aws/codebuild/android-java-6:24.4.1",
+                "aws/codebuild/docker:1.12.1",
+                "aws/codebuild/golang:1.7.3",
+                "aws/codebuild/golang:1.6.3",
+                "aws/codebuild/golang:1.5.4",
+                "aws/codebuild/java:openjdk-8",
+                "aws/codebuild/java:openjdk-7",
+                "aws/codebuild/java:openjdk-6",
+                "aws/codebuild/nodejs:7.0.0",
+                "aws/codebuild/nodejs:6.3.1",
+                "aws/codebuild/nodejs:5.12.0",
+                "aws/codebuild/nodejs:4.4.7",
+                "aws/codebuild/nodejs:4.3.2",
+                "aws/codebuild/python:3.5.2",
+                "aws/codebuild/python:3.4.5",
+                "aws/codebuild/python:3.3.6",
+                "aws/codebuild/python:2.7.12",
+                "aws/codebuild/ruby:2.3.1",
+                "aws/codebuild/ruby:2.2.5",
+                "aws/codebuild/ruby:2.1.10",
+                "aws/codebuild/dot-net:core-1"
+            ],
+            "Description": "Docker Image to use in CodeBuild Project",
+            "Type": "String"
+        },
+        "GithubToken": {
+            "Description": "GitHub API Token used for Status creation.",
+            "Type": "String"
+        },
+        "ProjectName": {
+            "AllowedPattern": "^[a-zA-Z0-9-_]*$",
+            "Description": "Name to give the CodeBuild Project. For this sample, use the same name as your repository.",
+            "MaxLength": "255",
+            "MinLength": "2",
+            "Type": "String"
+        },
+        "RepositoryUrl": {
+            "Description": "HTTPS Clone URL of the repository in GitHub. Example: 'https://github.com/owner/repo.git'",
+            "Type": "String"
+        },
+        "S3Bucket": {
+            "Description": "S3 Bucket name for Lambda Function Zip",
+            "Type": "String"
+        },
+        "S3Key": {
+            "Description": "S3 Key for Lambda Function Zip",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "ApiRole": {
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "apigateway.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ],
+                    "Version": "2012-10-17"
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "logs:Put*",
+                                        "lambda:Invoke*",
+                                        "iam:PassRole"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": "*"
+                                }
+                            ],
+                            "Version": "2012-10-17"
+                        },
+                        "PolicyName": "codebuild-ci-sample-ApiPolicy"
+                    }
+                ],
+                "RoleName": "codebuild-ci-sample-ApiRole"
+            },
+            "Type": "AWS::IAM::Role"
+        },
+        "CodeBuildRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "codebuild.amazonaws.com",
+                                    "events.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ],
+                    "Version": "2012-10-17"
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "events:Put*",
+                                        "logs:Put*",
+                                        "logs:Create*",
+                                        "s3:Put*",
+                                        "lambda:Invoke*"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": "*"
+                                }
+                            ],
+                            "Version": "2012-10-17"
+                        },
+                        "PolicyName": "codebuild-ci-sample-CodeBuildPolicy"
+                    }
+                ],
+                "RoleName": "codebuild-ci-sample-CodeBuildRole"
+            }
+        },
+        "LambdaRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ],
+                    "Version": "2012-10-17"
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "codebuild:BatchGetBuilds",
+                                        "codebuild:StartBuild"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:codebuild:us-east-1:",
+                                                {
+                                                    "Ref": "AWS::AccountId"
+                                                },
+                                                ":project/",
+                                                {
+                                                    "Ref": "ProjectName"
+                                                }
+                                            ]
+                                        ]
+                                    }
+                                }
+                            ],
+                            "Version": "2012-10-17"
+                        },
+                        "PolicyName": "codebuild-ci-sample-LambdaPolicy-codebuild"
+                    },
+                    {
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "logs:*"
+                                    ],
+                                    "Effect": "Allow",
+                                    "Resource": "arn:aws:logs:*:*:*"
+                                }
+                            ],
+                            "Version": "2012-10-17"
+                        },
+                        "PolicyName": "codebuild-ci-sample-LambdaPolicy-cloudwatch"
+                    }
+                ],
+                "RoleName": "codebuild-ci-sample-LambdaRole"
+            }
+        },
+        "LambdaFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "S3Bucket"
+                    },
+                    "S3Key": {
+                        "Ref": "S3Key"
+                    }
+                },
+                "Description": "Connects GitHub to CodeBuild for CI",
+                "Environment": {
+                    "Variables": {
+                        "GITHUB_TOKEN": {
+                            "Ref": "GithubToken"
+                        }
+                    }
+                },
+                "FunctionName": "CodeBuild-CI-Sample",
+                "Handler": "index.handler",
+                "MemorySize": 128,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "python3.6",
+                "Timeout": "30"
+            }
+        },
+        "StatusPermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Ref": "LambdaFunction"
+                },
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "CodeBuildStatus",
+                        "Arn"
+                    ]
+                }
+            }
+        },
+        "RestApi": {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {
+                "Name": "codebuild-ci-sample"
+            }
+        },
+        "ApiDeployment": {
+            "Type": "AWS::ApiGateway::Deployment",
+            "DependsOn": "ApiMethod",
+            "Properties": {
+                "RestApiId": {
+                    "Ref": "RestApi"
+                }
+            }
+        },
+        "ApiKey": {
+            "Type": "AWS::ApiGateway::ApiKey",
+            "Properties": {
+                "StageKeys": [
+                    {
+                        "RestApiId": {
+                            "Ref": "RestApi"
+                        },
+                        "StageName": {
+                            "Ref": "ApiStage"
+                        }
+                    }
+                ]
+            }
+        },
+        "ApiMethod": {
+            "Type": "AWS::ApiGateway::Method",
+            "DependsOn": "LambdaFunction",
+            "Properties": {
+                "AuthorizationType": "NONE",
+                "HttpMethod": "ANY",
+                "Integration": {
+                    "Credentials": {
+                        "Fn::GetAtt": [
+                            "ApiRole",
+                            "Arn"
+                        ]
+                    },
+                    "IntegrationHttpMethod": "ANY",
+                    "Type": "AWS_PROXY",
+                    "Uri": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/",
+                                {
+                                    "Fn::GetAtt": [
+                                        "LambdaFunction",
+                                        "Arn"
+                                    ]
+                                },
+                                "/invocations"
+                            ]
+                        ]
+                    }
+                },
+                "ResourceId": {
+                    "Ref": "ApiResource"
+                },
+                "RestApiId": {
+                    "Ref": "RestApi"
+                }
+            }
+        },
+        "ApiPermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Ref": "LambdaFunction"
+                },
+                "Principal": "apigateway.amazonaws.com"
+            }
+        },
+        "ApiResource": {
+            "Type": "AWS::ApiGateway::Resource",
+            "Properties": {
+                "ParentId": {
+                    "Fn::GetAtt": [
+                        "RestApi",
+                        "RootResourceId"
+                    ]
+                },
+                "PathPart": "{proxy+}",
+                "RestApiId": {
+                    "Ref": "RestApi"
+                }
+            }
+        },
+        "ApiStage": {
+            "Type": "AWS::ApiGateway::Stage",
+            "Properties": {
+                "DeploymentId": {
+                    "Ref": "ApiDeployment"
+                },
+                "RestApiId": {
+                    "Ref": "RestApi"
+                },
+                "StageName": "v1"
+            }
+        },
+        "CodeBuildProject": {
+            "Type": "AWS::CodeBuild::Project",
+            "Properties": {
+                "Artifacts": {
+                    "Type": "NO_ARTIFACTS"
+                },
+                "Description": "GitHub CI Build Project Sample",
+                "Environment": {
+                    "ComputeType": "BUILD_GENERAL1_SMALL",
+                    "Image": {
+                        "Ref": "BuildImage"
+                    },
+                    "Type": "LINUX_CONTAINER"
+                },
+                "Name": {
+                    "Ref": "ProjectName"
+                },
+                "ServiceRole": {
+                    "Ref": "CodeBuildRole"
+                },
+                "Source": {
+                    "Auth": {
+                        "Type": "OAUTH"
+                    },
+                    "Location": {
+                        "Ref": "RepositoryUrl"
+                    },
+                    "Type": "GITHUB"
+                },
+                "TimeoutInMinutes": "30"
+            }
+        },
+        "CodeBuildStatus": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Description": "Update GitHub Status after CodeBuild completes",
+                "EventPattern": {
+                    "detail": {
+                        "build-status": [
+                            "SUCCEEDED",
+                            "FAILED",
+                            "STOPPED"
+                        ],
+                        "project-name": [
+                            {
+                                "Ref": "ProjectName"
+                            }
+                        ]
+                    },
+                    "detail-type": [
+                        "CodeBuild Build State Change"
+                    ],
+                    "source": [
+                        "aws.codebuild"
+                    ]
+                },
+                "Name": "codebuild-ci-sample-notification",
+                "RoleArn": {
+                    "Fn::GetAtt": [
+                        "CodeBuildRole",
+                        "Arn"
+                    ]
+                },
+                "State": "ENABLED",
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "LambdaFunction",
+                                "Arn"
+                            ]
+                        },
+                        "Id": "Update-GitHub-Status"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "WebhookUrl": {
+            "Description": "URL for GitHub Webhook",
+            "Value": {
+                "Fn::Join": [
+                    "",
+                    [
+                        {
+                            "Ref": "RestApi"
+                        },
+                        ".execute-api.",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        ".amazonaws.com/",
+                        "v1",
+                        "/webhook"
+                    ]
+                ]
+            }
+        }
+    }
+}
